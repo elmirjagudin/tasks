@@ -1,48 +1,37 @@
 #!/usr/bin/env python
 
 import asyncio
+from pathlib import Path
 from sys import stdin
 from itertools import count
 from threading import Thread
 
 
-async def read_stdout(stdout):
-    print("read_stdout")
-    while True:
-        buf = await stdout.read(1024 * 4)
-        if not buf:
-            break
+async def log_output(stream, log_file):
+    print(f"log {stream} to {log_file}")
 
-        print(f"stdout: { buf }")
+    with log_file.open("wb") as log:
+        while True:
+            buf = await stream.read(1024 * 4)
+            if not buf:
+                break
 
-
-async def read_stderr(stderr):
-    print("read_stderr")
-    while True:
-        buf = await stderr.read()
-        if not buf:
-            break
-
-        print(f"stderr: { buf }")
+            log.write(buf)
+            log.flush()
 
 
-async def run_command(command):
+async def run_command(command, stdout_log, stderr_log):
     print(f"running '{command}'")
 
     try:
-        proc = await asyncio.create_subprocess_shell(
+        proc = await asyncio.create_subprocess_exec(
             command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
 
-        await asyncio.gather(read_stderr(proc.stderr), read_stdout(proc.stdout))
+        await asyncio.gather(
+            log_output(proc.stdout, stdout_log), log_output(proc.stderr, stderr_log)
+        )
 
-    #        stdout, stderr = await proc.communicate()
-
-    # print(f"[{command!r} exited with {proc.returncode}]")
-    # if stdout:
-    #     print(f"[stdout]\n{stdout.decode()}")
-    # if stderr:
-    #     print(f"[stderr]\n{stderr.decode()}")
     except asyncio.CancelledError:
         print("i'm canceled, terminating command")
         proc.terminate()
@@ -75,15 +64,28 @@ def stop_loop(loop, loop_thread):
 
 
 class Tasks:
+    LOGS_DIR = Path("logs")
+
     def __init__(self, loop):
         self.loop = loop
         self.tasks = {}
         self.task_ids = count(1)
 
     def start_task(self, command):
-        task_future = asyncio.run_coroutine_threadsafe(run_command(command), self.loop)
+        def _log_paths():
+            return (
+                Path(self.LOGS_DIR, f"stdout-{task_id}.log"),
+                Path(self.LOGS_DIR, f"stderr-{task_id}.log"),
+            )
 
-        return self._add_task(task_future)
+        task_id = self.task_ids.__next__()
+
+        task_future = asyncio.run_coroutine_threadsafe(
+            run_command(command, *_log_paths()), self.loop
+        )
+
+        self.tasks[task_id] = task_future
+        return task_id
 
     def cancel_task(self, task_id):
         if task_id not in self.tasks:
