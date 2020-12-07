@@ -78,10 +78,17 @@ class Tasks:
             self.loop,
         )
 
+        task_future.add_done_callback(lambda _: self._task_done(task_id))
+
         self.tasks_mq.add_running_task(task_id, RunningTask(cmd.binary, "STD", "ERR"))
 
         self.tasks[task_id] = task_future
         return task_id
+
+    def _task_done(self, task_id):
+        print("TASK DONE", task_id)
+        self.tasks_mq.remove_running_task(task_id)
+        del self.tasks[task_id]
 
     def cancel_task(self, task_id):
         if task_id not in self.tasks:

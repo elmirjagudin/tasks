@@ -98,5 +98,8 @@ class TasksMQ:
             self.RUNNING_TASKS, task_id, running_task.serialize()
         )
 
+    def remove_running_task(self, task_id):
+        self.redis_connection.hdel(self.RUNNING_TASKS, task_id)
+
     def get_running_tasks(self):
         return self.redis_connection.hgetall(self.RUNNING_TASKS)
