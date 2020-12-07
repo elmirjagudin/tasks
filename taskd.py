@@ -3,7 +3,7 @@
 import asyncio
 from itertools import count
 from threading import Thread
-from tasks_queue import CommandsQueue
+from tasks_queue import TasksMQ, RunningTask
 
 
 async def log_output(stream, log_file):
@@ -64,8 +64,9 @@ def stop_loop(loop, loop_thread):
 
 
 class Tasks:
-    def __init__(self, loop):
+    def __init__(self, loop, tasks_mq):
         self.loop = loop
+        self.tasks_mq = tasks_mq
         self.tasks = {}
         self.task_ids = count(1)
 
@@ -76,6 +77,8 @@ class Tasks:
             run_command(cmd.binary, cmd.arguments, "stdout.log", "stderr.log"),
             self.loop,
         )
+
+        self.tasks_mq.add_running_task(task_id, RunningTask(cmd.binary, "STD", "ERR"))
 
         self.tasks[task_id] = task_future
         return task_id
@@ -102,11 +105,11 @@ class Tasks:
 def main():
     loop, loop_thread = start_loop()
 
-    tasks = Tasks(loop)
+    tasks_mq = TasksMQ()
+    tasks = Tasks(loop, tasks_mq)
 
-    cmd_queue = CommandsQueue()
     while True:
-        task_cmd = cmd_queue.dequeue_cmd()
+        task_cmd = tasks_mq.dequeue_task_command()
         cmd_type = task_cmd.TYPE
         if cmd_type == "start_task":
             task_id = tasks.start_task(task_cmd)

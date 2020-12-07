@@ -2,12 +2,22 @@ from json import dumps, loads
 from redis import Redis
 
 
-class TaskCommand:
+class JsonSerializable:
     def serialize(self):
         return dumps(self._as_dict())
 
 
-class StartTask(TaskCommand):
+class RunningTask(JsonSerializable):
+    def __init__(self, name, stdlog, errlog):
+        self.name = name
+        self.stdlog = stdlog
+        self.errlog = errlog
+
+    def _as_dict(self):
+        return {"name": self.name, "stdlog": self.stdlog, "errlog": self.errlog}
+
+
+class StartTask(JsonSerializable):
     TYPE = "start_task"
 
     def __init__(self, binary, arguments):
@@ -35,7 +45,7 @@ class StartTask(TaskCommand):
         return f"StartTask: binary '{self.binary}' arguments {self.arguments}"
 
 
-class CancelTask(TaskCommand):
+class CancelTask(JsonSerializable):
     TYPE = "cancel_task"
 
     def __init__(self, task_id):
@@ -68,16 +78,25 @@ def _deserialize_command(data):
     raise ValueError(f"unknown command {cmd}")
 
 
-class CommandsQueue:
-    TASKS_QUEUE = "tasks_queue"
+class TasksMQ:
+    TASKS_QUEUE = "tasks:enqueued"
+    RUNNING_TASKS = "tasks:running"
 
     def __init__(self):
         self.redis_connection = Redis()
 
-    def dequeue_cmd(self):
+    def enqueue_task_command(self, command):
+        self.redis_connection.lpush(self.TASKS_QUEUE, command.serialize())
+
+    def dequeue_task_command(self):
         _, data = self.redis_connection.brpop(self.TASKS_QUEUE)
 
         return _deserialize_command(data)
 
-    def enqueue_cmd(self, command):
-        self.redis_connection.lpush(self.TASKS_QUEUE, command.serialize())
+    def add_running_task(self, task_id, running_task):
+        self.redis_connection.hset(
+            self.RUNNING_TASKS, task_id, running_task.serialize()
+        )
+
+    def get_running_tasks(self):
+        return self.redis_connection.hgetall(self.RUNNING_TASKS)
