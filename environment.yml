@@ -3,3 +3,5 @@ channels:
   - conda-forge
 dependencies:
   - python=3.8.6
+  - redis=5.0.3
+  - redis-py=3.5.3

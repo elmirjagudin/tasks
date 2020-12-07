@@ -1,16 +1,13 @@
 #!/usr/bin/env python
 
 import asyncio
-from pathlib import Path
-from sys import stdin
 from itertools import count
 from threading import Thread
+from tasks_queue import CommandsQueue
 
 
 async def log_output(stream, log_file):
-    print(f"log {stream} to {log_file}")
-
-    with log_file.open("wb") as log:
+    with open(log_file, "wb") as log:
         while True:
             buf = await stream.read(1024 * 4)
             if not buf:
@@ -20,12 +17,15 @@ async def log_output(stream, log_file):
             log.flush()
 
 
-async def run_command(command, stdout_log, stderr_log):
+async def run_command(command, args, stdout_log, stderr_log):
     print(f"running '{command}'")
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            command,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
 
         await asyncio.gather(
@@ -64,24 +64,17 @@ def stop_loop(loop, loop_thread):
 
 
 class Tasks:
-    LOGS_DIR = Path("logs")
-
     def __init__(self, loop):
         self.loop = loop
         self.tasks = {}
         self.task_ids = count(1)
 
-    def start_task(self, command):
-        def _log_paths():
-            return (
-                Path(self.LOGS_DIR, f"stdout-{task_id}.log"),
-                Path(self.LOGS_DIR, f"stderr-{task_id}.log"),
-            )
-
+    def start_task(self, cmd):
         task_id = self.task_ids.__next__()
 
         task_future = asyncio.run_coroutine_threadsafe(
-            run_command(command, *_log_paths()), self.loop
+            run_command(cmd.binary, cmd.arguments, "stdout.log", "stderr.log"),
+            self.loop,
         )
 
         self.tasks[task_id] = task_future
@@ -111,16 +104,15 @@ def main():
 
     tasks = Tasks(loop)
 
-    while (line := stdin.readline()) != "":
-        command, args = parse_command(line)
-
-        if command == "r":
-            task_id = tasks.start_task(args)
-            print(task_id)
-        elif command == "c":
-            tasks.cancel_task(int(args))
-        else:
-            print(f"unknown command '{command}'")
+    cmd_queue = CommandsQueue()
+    while True:
+        task_cmd = cmd_queue.dequeue_cmd()
+        cmd_type = task_cmd.TYPE
+        if cmd_type == "start_task":
+            task_id = tasks.start_task(task_cmd)
+            print(f"started task {task_id}")
+        elif cmd_type == "cancel_task":
+            tasks.cancel_task(int(task_cmd.task_id))
 
     stop_loop(loop, loop_thread)
 
